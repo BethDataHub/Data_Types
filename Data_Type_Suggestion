@@ -1,24 +1,22 @@
+/*Enter your server name below*/
 $Server = ""
 
 ##Get each user database (To be evaluated by this data type suggestion process)
-$DatabaseQuery = (Invoke-Sqlcmd -ServerInstance $Server -Database Master -Query "SELECT [Name] FROM sys.databases
-WHERE [Name] NOT IN ('master','model','msdb','tempdb')")
-$Databases = $DatabaseQuery.Name
+$Databases = (Invoke-Sqlcmd -ServerInstance $Server -Database Master -Query "SELECT [Name] FROM sys.databases
+WHERE [Name] NOT IN ('master','model','msdb','tempdb')").Name
 
 ##Loop through Databases to get all column info
 try {
       foreach ($Database in $Databases)
       {
          ##Get table names and info for column suggestions
-         $TablesQuery = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT [Name],[Object_id] FROM sys.tables;")
-         $Tables = $TablesQuery.Name
-         
+         $Tables = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT [Name],[Object_id] FROM sys.tables;").Name
+
          ##Loop through tables to check each column's current state (e.g. NVARCHAR with a max string length of 50)
          foreach ($Table in $Tables)
          {
             try {
-                  $ColumnsInfo = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS C WHERE TABLE_NAME = '$($Table)' ;")  
-                  $Columns = $ColumnsInfo.Column_Name
+                  $Columns = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COLUMN_NAME FROM INFORMATION_SCHEMA.COLUMNS C WHERE TABLE_NAME = '$($Table)' ;").Column_Name
 
                   ##Loop each column to check values
                   foreach ($Column in $Columns)
@@ -26,50 +24,45 @@ try {
                     $Columnsinfo = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COLUMN_NAME, DATA_TYPE, CHARACTER_MAXIMUM_LENGTH FROM INFORMATION_SCHEMA.COLUMNS C WHERE TABLE_NAME = '$($Table)' AND COLUMN_NAME = '$($Column)';")  
                     $Data_Type = $ColumnsInfo.DATA_TYPE
                     $MaxChar = $Columnsinfo.Character_Maximum_Length
-                    
+
                     ##Check string values
                     if ($Data_Type -like "*char")
                     {
-                        $UnicodeCheck = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COUNT(*) AS NCount FROM [dbo].[$($Table)] WHERE CAST([$($Column)] AS CHAR) <> [$($Column)]")
-                        $FixedLengthCheck = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COUNT(DISTINCT LEN([$($Column)])) AS LCount FROM [dbo].[$($Table)]")
-                        $MaxLength = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT MAX(LEN([$($Column)])) AS MCount FROM [dbo].[$($Table)]")
-                        $NCount = $UnicodeCheck.NCount
-                        $LCount = $FixedLengthCheck.LCount
-                        $MCount = $MaxLength.MCount
+                        $UnicodeCheck = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COUNT(*) AS NCount FROM [dbo].[$($Table)] WHERE CAST([$($Column)] AS CHAR) <> [$($Column)]").NCount
+                        $FixedLengthCheck = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COUNT(DISTINCT LEN([$($Column)])) AS LCount FROM [dbo].[$($Table)]").LCount
+                        $MaxLength = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT MAX(LEN([$($Column)])) AS MCount FROM [dbo].[$($Table)]").MCount
                         ##If value doesn't contain unicode then CHAR OR VARCHAR else NCHAR OR NVARCHAR
-                        if ($NCount -eq 0)
+                        if ($UnicodeCheck -eq 0)
                         {
                             ##Value doesn't contain unicode and if value has a fixed length then CHAR else VARCHAR
-                            if ($LCount -eq 1)
+                            if ($FixedLengthCheck -eq 1)
                             {
-                                Write-Host "CHAR($($MCount)) - $($Column) - $($Table)"
+                                Write-Host "CHAR($($MaxLength)) - $($Column) - $($Table)"
                             }
                             else
                             {
-                                Write-Host "VARCHAR($($MCount)) - $($Column) - $($Table)"
+                                Write-Host "VARCHAR($($MaxLength)) - $($Column) - $($Table)"
                             }
                         }
-                        
+
                         else
                         {
                             ##Value contains unicode and if value has a fixed length then NCHAR else NVARCHAR
-                            if ($LCount -eq 1)
+                            if ($FixedLengthCheck -eq 1)
                             {
-                                Write-Host "NCHAR($($MCount)) - $($Column) - $($Table)"
+                                Write-Host "NCHAR($($MaxLength)) - $($Column) - $($Table)"
                             }
                             else
                             {
-                                Write-Host "NVARCHAR($($MCount)) - $($Column) - $($Table)"
+                                Write-Host "NVARCHAR($($MaxLength)) - $($Column) - $($Table)"
                             }
                         }
                     }
                     elseif ($Data_Type -like "*int")
                     {
                         ##Get Min and Max number to determine suitable int type
-                        $MaxNums = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT MAX($($Column)) AS MaxNum FROM [dbo].[$($Table)]")
-                        $MinNums = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT MIN($($Column)) AS MinNum FROM [dbo].[$($Table)]")
-                        $MaxNum = $MaxNums.MaxNum
-                        $MinNum = $MinNums.MinNum
+                        $MaxNum = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT MAX($($Column)) AS MaxNum FROM [dbo].[$($Table)]").MaxNum
+                        $MinNum = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT MIN($($Column)) AS MinNum FROM [dbo].[$($Table)]").MinNum
 
                         ##If values are between 0 to 255 then TinyInt (1 byte)
                         if ($MinNum -ge 0 -and $MaxNum -le 255 -and $Column -notlike "*id*")
@@ -95,13 +88,12 @@ try {
                         {
                             Write-Host "Error - $($Column) - $($Table)"
                         }
-                        
+
                     }
                     elseif ($Data_Type -like "*datetime")
                     {
                         ##If all times have been captured as 00:00:00 then consider Date instead of DateTime
-                        $TimeChecks = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COUNT(*) AS TimeCheck FROM [dbo].[$($Table)] WHERE CAST(RIGHT([$($Column)],12) AS TIME) <> '00:00:00';")
-                        $TimeCheck = $TimeChecks.TimeCheck
+                        $TimeCheck = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COUNT(*) AS TimeCheck FROM [dbo].[$($Table)] WHERE CAST(RIGHT([$($Column)],12) AS TIME) <> '00:00:00';").TimeCheck
                         if ($TimeCheck -eq 0)
                         {
                             Write-Host "Date - $($Column) - $($Table)"
@@ -123,5 +115,3 @@ try {
 
     }
 catch { Write-Host "Error while looping through $($Database)" }  
-
-
