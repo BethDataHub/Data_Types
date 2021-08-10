@@ -94,13 +94,22 @@ try {
                     {
                         ##If all times have been captured as 00:00:00 then consider Date instead of DateTime
                         $TimeCheck = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COUNT(*) AS TimeCheck FROM [dbo].[$($Table)] WHERE CAST(RIGHT([$($Column)],12) AS TIME) <> '00:00:00';").TimeCheck
+                        $DateCheck = (Invoke-Sqlcmd -ServerInstance $Server -Database $Database -Query "SELECT COUNT(*) AS DateCheck FROM [dbo].[$($Table)] WHERE CONVERT(char(10), $($Column),126) < '1900-01-01';").DateCheck
                         if ($TimeCheck -eq 0)
                         {
                             Write-Host "Date - $($Column) - $($Table)"
                         }
                         else
                         {
-                            Write-Host "DateTime - $($Column) - $($Table)"
+                            if ($DateCheck -eq 0)
+                            {
+                                Write-Host "SmallDateTime - $($Column) - $($Table)"
+                            }
+                            else
+                            {
+                                Write-Host "DateTime - $($Column) - $($Table)"
+                            }
+                            
                         }
                     }
                     else
